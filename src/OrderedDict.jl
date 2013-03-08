@@ -53,6 +53,9 @@ import Base.push!, Base.pop!, Base.unshift!, Base.shift!, Base.append! #, Base.i
 # Useful, unexported by Base
 import Base.findnextnot, Base.findfirstnot   ## from bitarray.jl
 import Base._tablesz, Base.hashindex         ## from dict.jl
+import Base.isslotempty, Base.isslotfilled, Base.isslotmissing
+import Base.ht_keyindex
+import Base._delete!
 
 # Sorting
 
@@ -88,7 +91,7 @@ export OrderedDict,
 ######################
 ## OrderedDict type ##
 
-type OrderedDict{K,V} <: Associative{K,V}
+type OrderedDict{K,V} <: AbstractHashTable{K,V}
     slots::Array{Uint8,1}
     keys::Array{K,1}
     vals::Array{V,1}
@@ -154,33 +157,33 @@ end
 ## Serialization ##
 # TODO: Remove these if AbstractDict versions become available
 
-function serialize(s, t::OrderedDict)
-    serialize_type(s, typeof(t))
-    write(s, int32(length(t)))
-    for (k,v) in t
-        serialize(s, k)
-        serialize(s, v)
-    end
-end
+# function serialize(s, t::OrderedDict)
+#     serialize_type(s, typeof(t))
+#     write(s, int32(length(t)))
+#     for (k,v) in t
+#         serialize(s, k)
+#         serialize(s, v)
+#     end
+# end
 
-function deserialize{K,V}(s, T::Type{OrderedDict{K,V}})
-    n = read(s, Int32)
-    t = T(); sizehint(t, n)
-    for i = 1:n
-        k = deserialize(s)
-        v = deserialize(s)
-        t[k] = v
-    end
-    return t
-end
+# function deserialize{K,V}(s, T::Type{OrderedDict{K,V}})
+#     n = read(s, Int32)
+#     t = T(); sizehint(t, n)
+#     for i = 1:n
+#         k = deserialize(s)
+#         v = deserialize(s)
+#         t[k] = v
+#     end
+#     return t
+# end
 
 ########################################
 ## Dict/OrderedDict Utility functions ##
 
 # TODO: Remove these if AbstractDict versions become available
-isslotempty(h::OrderedDict, i::Int) = h.slots[i] == 0x0
-isslotfilled(h::OrderedDict, i::Int) = h.slots[i] == 0x1
-isslotmissing(h::OrderedDict, i::Int) = h.slots[i] == 0x2
+# isslotempty(h::OrderedDict, i::Int) = h.slots[i] == 0x0
+# isslotfilled(h::OrderedDict, i::Int) = h.slots[i] == 0x1
+# isslotmissing(h::OrderedDict, i::Int) = h.slots[i] == 0x2
 
 # OrderedDict version of rehash
 function rehash{K,V}(h::OrderedDict{K,V}, newsz)
@@ -230,31 +233,31 @@ end
 
 # get the index where a key is stored, or -1 if not present
 # TODO: remove if AbstractDict version becomes available
-function ht_keyindex{K,V}(h::OrderedDict{K,V}, key)
-    sz = length(h.keys)
-    iter = 0
-    maxprobe = max(16, sz>>6)
-    index = hashindex(key, sz)
-    orig = index
-    keys = h.keys
+# function ht_keyindex{K,V}(h::OrderedDict{K,V}, key)
+#     sz = length(h.keys)
+#     iter = 0
+#     maxprobe = max(16, sz>>6)
+#     index = hashindex(key, sz)
+#     orig = index
+#     keys = h.keys
 
-    while true
-        if isslotempty(h,index)
-            break
-        end
-        if !isslotmissing(h,index) && isequal(key,keys[index])
-            return index
-        end
+#     while true
+#         if isslotempty(h,index)
+#             break
+#         end
+#         if !isslotmissing(h,index) && isequal(key,keys[index])
+#             return index
+#         end
 
-        index = (index & (sz-1)) + 1
-        iter+=1
-        if iter > maxprobe || index==orig
-            break
-        end
-    end
+#         index = (index & (sz-1)) + 1
+#         iter+=1
+#         if iter > maxprobe || index==orig
+#             break
+#         end
+#     end
 
-    return -1
-end
+#     return -1
+# end
 
 
 # Removes empty slots of order array in OrderedDict
@@ -294,8 +297,8 @@ next(t::OrderedDict, i) = (idx = t.ord[i]; ((t.keys[idx],t.vals[idx]), skip_dele
 #########################
 ## General Collections ##
 
-isempty(t::OrderedDict) = (t.count == 0)
-length(t::OrderedDict) = t.count
+# isempty(t::OrderedDict) = (t.count == 0)
+# length(t::OrderedDict) = t.count
 
 function empty!{K,V}(h::OrderedDict{K,V})
     fill!(h.slots, 0x0)
@@ -387,25 +390,25 @@ function assign{K,V}(h::OrderedDict{K,V}, v, key)
 end
 
 # TODO: remove if AbstractDict version becomes available
-function ref{K,V}(h::OrderedDict{K,V}, key)
-    index = ht_keyindex(h, key)
-    return (index<0) ? throw(KeyError(key)) : h.vals[index]::V
-end
+# function ref{K,V}(h::OrderedDict{K,V}, key)
+#     index = ht_keyindex(h, key)
+#     return (index<0) ? throw(KeyError(key)) : h.vals[index]::V
+# end
 
 #############################
 ## Associative Collections ##
 
-has(h::OrderedDict, key) = (ht_keyindex(h, key) >= 0)
+# has(h::OrderedDict, key) = (ht_keyindex(h, key) >= 0)
 
-function get{K,V}(h::OrderedDict{K,V}, key, deflt)
-    index = ht_keyindex(h, key)
-    return (index<0) ? deflt : h.vals[index]::V
-end
+# function get{K,V}(h::OrderedDict{K,V}, key, deflt)
+#     index = ht_keyindex(h, key)
+#     return (index<0) ? deflt : h.vals[index]::V
+# end
 
-function getkey{K,V}(h::OrderedDict{K,V}, key, deflt)
-    index = ht_keyindex(h, key)
-    return (index<0) ? deflt : h.keys[index]::K
-end
+# function getkey{K,V}(h::OrderedDict{K,V}, key, deflt)
+#     index = ht_keyindex(h, key)
+#     return (index<0) ? deflt : h.keys[index]::K
+# end
 
 function _delete!(h::OrderedDict, index)
     val = h.vals[index]
@@ -422,15 +425,15 @@ function _delete!(h::OrderedDict, index)
     return val
 end
 
-function delete!(h::OrderedDict, key)
-    index = ht_keyindex(h, key)
-    index > 0 ? _delete!(h, index) : throw(KeyError(key))
-end
+# function delete!(h::OrderedDict, key)
+#     index = ht_keyindex(h, key)
+#     index > 0 ? _delete!(h, index) : throw(KeyError(key))
+# end
 
-function delete!(h::OrderedDict, key, default)
-    index = ht_keyindex(h, key)
-    index > 0 ? _delete!(h, index) : default
-end
+# function delete!(h::OrderedDict, key, default)
+#     index = ht_keyindex(h, key)
+#     index > 0 ? _delete!(h, index) : default
+# end
 
 ##################
 ## Dequeue-like ##
