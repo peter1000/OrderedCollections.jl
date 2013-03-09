@@ -89,20 +89,13 @@ export OrderedDict,
 ## OrderedDict type ##
 
 type OrderedDict{K,V} <: Associative{K,V}
-    slots::Array{Uint8,1}
-    keys::Array{K,1}
-    vals::Array{V,1}
-    ord_idxs::Array{Int,1}
+    ht::Dict{K,(V,Int)}
     ord_slots::BitArray
     ord::Array{Int,1}
-    ndel::Int
     odel::Int
-    count::Int
-    deleter::Function
 
     function OrderedDict()
-        n = 16
-        new(zeros(Uint8,n), Array(K,n), Array(V,n), Array(Int,n), BitArray(), Array(Int,0), 0, 0, 0, identity)
+        new(Dict(), BitArray(), Array(Int,0), 0)
     end
     function OrderedDict(ks, vs)
         n = length(ks)
@@ -129,30 +122,15 @@ OrderedDict{V  }(ks::Tuple , vs::(V...)) = OrderedDict{Any,V  }(ks, vs)
 similar{K,V}(d::OrderedDict{K,V}) = OrderedDict{K,V}()
 
 function sizehint(d::OrderedDict, newsz)
-    oldsz = length(d.slots)
-    if newsz <= oldsz
-        # todo: shrink
-        # be careful: rehash() assumes everything fits. it was only designed
-        # for growing.
-        return d
+    if newsz > length(d.ht.slots)
+        sizehint(d.ht, newsz)
+        update_order(d)
     end
-    # grow at least 25%
-    newsz = max(newsz, (oldsz*5)>>2)
-    rehash(d, newsz)
 end
-
-## TODO: some of these are simply copied from base/dict.jl,
-##       and the type was changed from Dict -> OrderedDict
-##
-##       (Field names might also be slightly different, but
-##       can be reverted.)
-##
-##       It would be nice if they were defined in terms
-##       of an AbstractDict <: Associative
 
 ###################
 ## Serialization ##
-# TODO: Remove these if AbstractDict versions become available
+# TODO: Remove these if AbstractDict versions become available?
 
 function serialize(s, t::OrderedDict)
     serialize_type(s, typeof(t))
@@ -183,49 +161,48 @@ isslotfilled(h::OrderedDict, i::Int) = h.slots[i] == 0x1
 isslotmissing(h::OrderedDict, i::Int) = h.slots[i] == 0x2
 
 # OrderedDict version of rehash
-function rehash{K,V}(h::OrderedDict{K,V}, newsz)
+function rehash{K,V}(d::OrderedDict{K,V}, newsz)
     newsz = _tablesz(newsz)
-    nel = h.count
-    h.ndel = h.count = 0
+    nel = d.count
+    d.ndel = d.count = 0
     if nel == 0
-        resize!(h.slots, newsz)
-        fill!(h.slots, 0)
-        resize!(h.keys, newsz)
-        resize!(h.vals, newsz)
-        resize!(h.ord_idxs, newsz)
-        resize!(h.ord_slots, 0)
-        resize!(h.ord, 0)
+        resize!(d.ht.slots, newsz)
+        fill!(d.ht.slots, 0)
+        resize!(d.ht.keys, newsz)
+        resize!(d.ht.vals, newsz)
+        resize!(d.ord_slots, 0)
+        resize!(d.ord, 0)
         return h
     end
-    olds = h.slots
-    oldk = h.keys
-    oldv = h.vals
-    oldi = h.ord_idxs
+    olds = d.ht.slots
+    oldk = d.ht.keys
+    oldv = d.ht.vals
+    oldi = d.ord_idxs
     sz = length(olds)
-    h.slots = zeros(Uint8,newsz)
-    h.keys = Array(K, newsz)
-    h.vals = Array(V, newsz)
-    h.ord_idxs = Array(Int, newsz)
+    d.ht.slots = zeros(Uint8,newsz)
+    d.ht.keys = Array(K, newsz)
+    d.ht.vals = Array(V, newsz)
+    d.ord_idxs = Array(Int, newsz)
 
     for i = 1:sz
         if olds[i] == 0x1
             k = oldk[i]
             index = hashindex(k, newsz)
-            while h.slots[index] != 0
+            while d.ht.slots[index] != 0
                 index = (index & (newsz-1)) + 1
             end
-            h.slots[index] = 0x1
-            h.keys[index] = k
-            h.vals[index] = oldv[i]
+            d.ht.slots[index] = 0x1
+            d.ht.keys[index] = k
+            d.ht.vals[index] = oldv[i]
 
             idx = oldi[i]
-            h.ord_idxs[index] = idx
-            h.ord[idx] = index
-            h.count += 1
+            d.ord_idxs[index] = idx
+            d.ord[idx] = index
+            d.count += 1
         end
     end
 
-    return h
+    return d
 end
 
 # get the index where a key is stored, or -1 if not present
