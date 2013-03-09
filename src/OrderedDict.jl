@@ -91,7 +91,7 @@ export OrderedDict,
 ######################
 ## OrderedDict type ##
 
-type OrderedDict{K,V} <: AbstractHashTable{K,V}
+type OrderedDict{K,V} <: AbstractHashDict{K,V}
     slots::Array{Uint8,1}
     keys::Array{K,1}
     vals::Array{V,1}
@@ -131,19 +131,6 @@ OrderedDict{V  }(ks::Tuple , vs::(V...)) = OrderedDict{Any,V  }(ks, vs)
 
 similar{K,V}(d::OrderedDict{K,V}) = OrderedDict{K,V}()
 
-function sizehint(d::OrderedDict, newsz)
-    oldsz = length(d.slots)
-    if newsz <= oldsz
-        # todo: shrink
-        # be careful: rehash() assumes everything fits. it was only designed
-        # for growing.
-        return d
-    end
-    # grow at least 25%
-    newsz = max(newsz, (oldsz*5)>>2)
-    rehash(d, newsz)
-end
-
 ## TODO: some of these are simply copied from base/dict.jl,
 ##       and the type was changed from Dict -> OrderedDict
 ##
@@ -152,6 +139,19 @@ end
 ##
 ##       It would be nice if they were defined in terms
 ##       of an AbstractDict <: Associative
+
+# function sizehint(d::OrderedDict, newsz)
+#     oldsz = length(d.slots)
+#     if newsz <= oldsz
+#         # todo: shrink
+#         # be careful: rehash() assumes everything fits. it was only designed
+#         # for growing.
+#         return d
+#     end
+#     # grow at least 25%
+#     newsz = max(newsz, (oldsz*5)>>2)
+#     rehash(d, newsz)
+# end
 
 ###################
 ## Serialization ##
