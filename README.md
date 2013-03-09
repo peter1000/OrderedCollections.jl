@@ -2,7 +2,7 @@ OrderedCollections
 ==================
 
 An ordered collection is simply a collection which has a particular
-order.  This package follows the convention where the default order is
+order.  This package follows the convention that the initial order is
 the insertion order of items in the collection, although this order
 can be changed via dequeue-like operations or sorting. 
 
