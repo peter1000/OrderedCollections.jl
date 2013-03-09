@@ -474,10 +474,17 @@ function _delete!(h::OrderedDict, index)
     return val
 end
 
-function delete!(h::OrderedDict, key)
+function delete!{K,V}(h::OrderedDict{K,V}, key)
     index = ht_keyindex(h, key)
     index > 0 ? _delete!(h, index) : throw(KeyError(key))
 end
+
+function delete!{K,V}(h::OrderedDict{K,V}, ord_idx::Integer)
+    key = h.keys[h.ord[ord_idx]]
+    (key, delete!(h, key))::(K,V)
+end
+
+delete!{K<:Number,V}(h::OrderedDict{K,V}, key::Integer) = invoke(delete!, (OrderedDict{K,V}, Any), h, key)
 
 function delete!(h::OrderedDict, key, default)
     index = ht_keyindex(h, key)
