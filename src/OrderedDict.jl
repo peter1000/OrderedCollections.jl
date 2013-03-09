@@ -18,12 +18,15 @@
 # Note also that this is not a sorted dictionary, although it can be
 # sorted with 
 #
-#   sort!(od)            # od is an OrderedDict()
+#   sort!(od)              # od is an OrderedDict()
+#   sortby!(od, x->od[x])  # sort by value
+#   od2 = sort(od)         # od is not modified
 #
 # You can also sort normal dictionaries, and get a sorted OrderedDict
 # back:
 #
 #   od = sort(d)         # d is a Dict; returns a sorted OrderedDict
+#   #sort!(d)            # error! Dicts can't be sorted in place!
 #
 
 # Construction
@@ -58,6 +61,29 @@ import Sort.DEFAULT_UNSTABLE, Sort.DEFAULT_STABLE,
        Sort.Ordering, Sort.Algorithm, 
        Sort.Forward, Sort.Reverse,
        Sort.By, Sort.Lt, Sort.lt
+
+# Exports
+
+export OrderedDict,
+    similar,
+    sizehint,
+    start,
+    next,
+    done,
+    empty!,
+    assign,
+    push!,
+    pop!,
+    unshift!,
+    shift!,
+    append!,
+    #insert!,
+    sort,
+    sort!,
+    sortby,
+    sortby!
+    sortperm
+
 
 ######################
 ## OrderedDict type ##
@@ -262,7 +288,8 @@ skip_deleted(t::OrderedDict, i::Int) = findnext(t.ord_slots, i)
 
 start(t::OrderedDict) = skip_deleted(t,1)
 done(t::OrderedDict, i) = (i == 0)
-next(t::OrderedDict, i) = (idx = t.ord[i]; (t.keys[idx],t.vals[idx]), skip_deleted(t,i+1))
+next(t::OrderedDict, i) = (idx = t.ord[i]; ((t.keys[idx],t.vals[idx]), skip_deleted(t,i+1)))
+
 
 #########################
 ## General Collections ##
@@ -544,3 +571,4 @@ for (sb,s) in {(:sortby!, :sort!), (:sortby, :sort), (:sortpermby, :sortperm)}
         $sb              (by::Function, v::OrderedDict, args...)             = $s(v, Sort.By(by), args...)
     end
 end
+
