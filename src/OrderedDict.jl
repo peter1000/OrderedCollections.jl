@@ -48,7 +48,7 @@ import Base.assign, Base.ref
 import Base.has, Base.get, Base.getkey, Base.delete!
 
 # Dequeue-like
-import Base.push!, Base.pop!, Base.unshift!, Base.shift!, Base.append! #, Base.insert!  ## TODO
+import Base.push!, Base.pop!, Base.unshift!, Base.shift!, Base.append!, Base.insert!
 
 # Useful, unexported by Base
 import Base.findnextnot, Base.findfirstnot   ## from bitarray.jl
@@ -77,12 +77,14 @@ export OrderedDict,
     unshift!,
     shift!,
     append!,
-    #insert!,
+    insert!,
     sort,
     sort!,
     sortby,
-    sortby!
-    sortperm
+    sortby!,
+    sortperm,
+    indexof,
+    getitem
 
 
 ######################
@@ -314,6 +316,26 @@ end
 ###########################
 ## Indexable Collections ##
 
+# As with ref, we want to allow assignment by index position as well, as key,
+# but we ignore this when K<:Number
+
+function assign{K,V}(h::OrderedDict{K,V}, kv::(Any,Any), index::Integer)
+    (key,v) = kv
+    ord_idx = indexof(h,key,0)
+    if ord_idx == index
+        return assign(h, v, key)
+    end
+    # TODO: this can be more efficient
+    delete!(h, h.keys[h.ord[index]])
+    insert!(h, index, kv)
+end
+
+assign{K<:Number,V}(h::OrderedDict{K,V}, v::(Any,Any), key::Integer) = 
+    invoke(assign, (OrderedDict{K,V}, Any, Any), h, v, key)
+assign{K<:Number,V}(h::OrderedDict{K,V}, v, key::Integer) = 
+    invoke(assign, (OrderedDict{K,V}, Any, Any), h, v, key)
+
+
 function assign{K,V}(h::OrderedDict{K,V}, v, key)
     key = convert(K,key)
     v   = convert(V,  v)
@@ -386,10 +408,34 @@ function assign{K,V}(h::OrderedDict{K,V}, v, key)
     assign(h, v, key)
 end
 
-# TODO: remove if AbstractDict version becomes available
+# We want to allow the user to access the (k,v) pairs by index
+# However, first and foremost, this is a dictionary, so if the
+# keys are numbers, assume any reference using an integer
+# as a key is attempting a has lookup.
+
+# TODO: This might be confusing behavior, so consider disabling
+# and simply sequential access through getitem()
+
+ref{K,V}(h::OrderedDict{K,V}, ord_idx::Integer) = getitem(h, ord_idx)
+
+function ref{K<:Number,V}(h::OrderedDict{K,V}, key::Integer)
+    index = ht_keyindex(h, key)
+    return (index<0) ? throw(KeyError(key)) : h.vals[index]::V
+end
+
 function ref{K,V}(h::OrderedDict{K,V}, key)
     index = ht_keyindex(h, key)
     return (index<0) ? throw(KeyError(key)) : h.vals[index]::V
+end
+
+function indexof{K,V}(h::OrderedDict{K,V}, key)
+    index = ht_keyindex(h, key)
+    return (index<0) ? throw(KeyError(key)) : (_compact(h); h.ord_idxs[index])
+end
+
+function indexof{K,V}(h::OrderedDict{K,V}, key, deflt)
+    index = ht_keyindex(h, key)
+    return (index<0) ? deflt : (_compact(h); h.ord_idxs[index])
 end
 
 #############################
@@ -405,6 +451,12 @@ end
 function getkey{K,V}(h::OrderedDict{K,V}, key, deflt)
     index = ht_keyindex(h, key)
     return (index<0) ? deflt : h.keys[index]::K
+end
+
+function getitem{K,V}(h::OrderedDict{K,V}, ord_idx)
+    _compact(h)
+    index = h.ord[ord_idx]
+    return (h.keys[index], h.vals[index])::(K,V)
 end
 
 function _delete!(h::OrderedDict, index)
@@ -436,88 +488,99 @@ end
 ## Dequeue-like ##
 
 # Add key-value pair at last slot
-# TODO: should this be the only push, so we can handle multiple items?
-push!(t::OrderedDict, item::(Any,Any)) = push!(t, item[1], item[2])
-push!(t::OrderedDict, k, v) = (delete!(t, k, nothing); t[k] = v; (k,v))
+push!{K,V}(d::OrderedDict{K,V}, item) = insert!(d, length(d)+1, item)
 
 # Remove and return last key-value pair
-function pop!(t::OrderedDict)
-    if isempty(t)
+function pop!{K,V}(d::OrderedDict{K,V})
+    if isempty(d)
         error("pop!: OrderedDict is empty")
     end
-    #idx = findlast(t.ord_slots) ## TODO: create this!
-    ######
-    local idx
-    for idx = length(t.ord):-1:1
-        if t.ord_slots[idx] break end
-    end
-    ######
-    k = t.keys[t.ord[idx]]
-    (k, delete!(t, k))
+    _compact(d) # TODO: more efficient: find last key index? See shift!
+    key = d.keys[d.ord[end]]
+    (key, delete!(d,key))::(K,V)
 end
 
 # Put key-value pair at front of dict
-function unshift!(t::OrderedDict, k, v)
-    # Note: O(N)!
-    # Add item, then move to beginning
-    delete!(t, k, nothing)
-    t[k] = v
-    if t.odel == 0
-        unshift!(t.ord, pop!(t.ord))
-        for i = 1:length(t.ord)
-            t.ord_idxs[t.ord[i]] = i
-        end
-    else
-        first_empty_idx = findfirstnot(t.ord_slots)
-        t.ord_slots[first_empty_idx] = true
-        new_ht_idx = pop!(t.ord)
-        pop!(t.ord_slots)
-        for i = first_empty_idx:-1:2
-            ht_idx = t.ord[i] = t.ord[i-1]
-            ord_idxs[ht_idx] = i
-        end
-        t.ord[1] = new_ht_idx
-        t.ord_idxs[new_ht_idx] = 1
-    end
-    (k,v)
-end
-# TODO: should this be the only unshift, so we can handle multiple items?
-unshift!(t::OrderedDict, item::(Any,Any)) = unshift!(t, item[1], item[2])
+unshift!{K,V}(d::OrderedDict{K,V}, item) = insert!(d, 1, item)
 
 # Remove and return first key-value pair
-function shift!(t::OrderedDict)
-    if isempty(t)
+function shift!{K,V}(d::OrderedDict{K,V})
+    if isempty(d)
         error("shift!: OrderedDict is empty")
     end
-    idx = findfirst(t.ord_slots)
-    k = t.keys[t.ord[idx]]
-    (k, delete!(t,k))
+    idx = findfirst(d.ord_slots)
+    key = d.keys[d.ord[idx]]
+    (key, delete!(d,key))::(K,V)
 end
 
 # Add multiple items to dictionary, at end
-function append!(t::OrderedDict, items)
-    for (k,v) in items
-        t[k] = v
+function append!{K,V}(h::OrderedDict{K,V}, items)
+    for item in items
+        push!(h, item)
     end
     items
 end
 
-# Sorting
-function sort!(t::OrderedDict, args...)
-    _compact(t)
-    p = sortperm(t.keys[t.ord], args...)
-    t.ord[:] = t.ord[p]
-    for i = 1:length(t.ord)
-        t.ord_idxs[t.ord[i]] = i
+# Add item to dictionary at a particular linear location
+# Note that if the key already exists in the dictionary, it is removed
+# first, and this might change the inserted position by one
+function insert!{K,V}(h::OrderedDict{K,V}, index::Integer, item::(Any,Any))
+    (key,v) = item
+    ord_idx = indexof(h, key, 0)
+    if ord_idx > 0 && index > ord_idx
+        index -= 1
     end
-    t
+    assign(h, v, key)
+    ord_idx = indexof(h, key)
+    if ord_idx == index
+        return item::(K,V)
+    end
+    _compact(h)  ## TODO: this could be removed, at the cost of more code
+    move_item!(h.ord, ord_idx, index)
+    _update_order(h, index, ord_idx)
+    item::(K,V)
 end
 
-function sort{K,V}(t::Dict{K,V}, args...)
+# move item in a from a[from] to a[to], shifting elements as needed
+function move_item!{T}(a::AbstractArray{T}, from, to)
+    item = a[from]
+    if from < to
+        for i = from:to-1
+            a[i] = a[i+1]
+        end
+    elseif from > to
+        for i = from:-1:to+1
+            a[i] = a[i-1]
+        end
+    end
+    a[to] = item
+    nothing
+end
+
+function _update_order{K,V}(h::OrderedDict{K,V}, first, last)
+    if first > last
+        (first, last) = (last, first)
+    end
+
+    for i = first:last
+        h.ord_idxs[h.ord[i]] = i
+    end
+end
+
+# Sorting
+function sort!(h::OrderedDict, args...)
+    _compact(h)
+    p = sortperm(h.keys[h.ord], args...)
+    h.ord[:] = h.ord[p]
+    _update_order(h, 1, length(h))
+    h
+end
+
+function sort{K,V}(h::Dict{K,V}, args...)
     d = OrderedDict{K,V}()
-    sizehint(d, length(t.slots))
-    for k in sort(keys(t))
-        d[k] = t[k]
+    sizehint(d, length(h.slots))
+    for k in sort(keys(h))
+        d[k] = h[k]
     end
     d
 end
