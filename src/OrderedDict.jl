@@ -42,7 +42,7 @@ import Base.start, Base.next, Base.done
 import Base.isempty, Base.empty!, Base.length
 
 # Indexable Collections
-import Base.assign, Base.ref
+import Base.setindex!, Base.getindex
 
 # Associative Collections
 import Base.has, Base.get, Base.getkey, Base.delete!
@@ -71,7 +71,8 @@ export OrderedDict,
     next,
     done,
     empty!,
-    assign,
+    getindex,
+    setindex!,
     push!,
     pop!,
     unshift!,
@@ -319,24 +320,24 @@ end
 # As with ref, we want to allow assignment by index position as well, as key,
 # but we ignore this when K<:Number
 
-function assign{K,V}(h::OrderedDict{K,V}, kv::(Any,Any), index::Integer)
+function setindex!{K,V}(h::OrderedDict{K,V}, kv::(Any,Any), index::Integer)
     (key,v) = kv
     ord_idx = indexof(h,key,0)
     if ord_idx == index
-        return assign(h, v, key)
+        return setindex!(h, v, key)
     end
     # TODO: this can be more efficient
     delete!(h, h.keys[h.ord[index]])
     insert!(h, index, kv)
 end
 
-assign{K<:Number,V}(h::OrderedDict{K,V}, v::(Any,Any), key::Integer) = 
-    invoke(assign, (OrderedDict{K,V}, Any, Any), h, v, key)
-assign{K<:Number,V}(h::OrderedDict{K,V}, v, key::Integer) = 
-    invoke(assign, (OrderedDict{K,V}, Any, Any), h, v, key)
+setindex!{K<:Number,V}(h::OrderedDict{K,V}, v::(Any,Any), key::Integer) = 
+    invoke(setindex!, (OrderedDict{K,V}, Any, Any), h, v, key)
+setindex!{K<:Number,V}(h::OrderedDict{K,V}, v, key::Integer) = 
+    invoke(setindex!, (OrderedDict{K,V}, Any, Any), h, v, key)
 
 
-function assign{K,V}(h::OrderedDict{K,V}, v, key)
+function setindex!{K,V}(h::OrderedDict{K,V}, v, key)
     key = convert(K,key)
     v   = convert(V,  v)
 
@@ -405,7 +406,7 @@ function assign{K,V}(h::OrderedDict{K,V}, v, key)
 
     rehash(h, h.count > 64000 ? sz*2 : sz*4)
 
-    assign(h, v, key)
+    setindex!(h, v, key)
 end
 
 # We want to allow the user to access the (k,v) pairs by index
@@ -416,14 +417,14 @@ end
 # TODO: This might be confusing behavior, so consider disabling
 # and simply sequential access through getitem()
 
-ref{K,V}(h::OrderedDict{K,V}, ord_idx::Integer) = getitem(h, ord_idx)
+getindex{K,V}(h::OrderedDict{K,V}, ord_idx::Integer) = getitem(h, ord_idx)
 
-function ref{K<:Number,V}(h::OrderedDict{K,V}, key::Integer)
+function getindex{K<:Number,V}(h::OrderedDict{K,V}, key::Integer)
     index = ht_keyindex(h, key)
     return (index<0) ? throw(KeyError(key)) : h.vals[index]::V
 end
 
-function ref{K,V}(h::OrderedDict{K,V}, key)
+function getindex{K,V}(h::OrderedDict{K,V}, key)
     index = ht_keyindex(h, key)
     return (index<0) ? throw(KeyError(key)) : h.vals[index]::V
 end
@@ -537,7 +538,7 @@ function insert!{K,V}(h::OrderedDict{K,V}, index::Integer, item::(Any,Any))
     if ord_idx > 0 && index > ord_idx
         index -= 1
     end
-    assign(h, v, key)
+    setindex!(h, v, key)
     ord_idx = indexof(h, key)
     if ord_idx == index
         return item::(K,V)
