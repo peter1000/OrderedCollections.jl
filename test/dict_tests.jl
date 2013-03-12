@@ -1,6 +1,3 @@
-#using Benchmark
-using OrderedCollections
-
 n = 100000
 strs = [randstring(10) for i = 1:n];
 nums = rand(Int, n);
@@ -67,13 +64,15 @@ function test_del(T::Type, iter::Int)
    t
 end
 
-for test in [test_ins, test_del, test_ins_del]
-    println(test)
-    println("="^length(string(test)))
-    for T in [Dict, OrderedDict]
-         print("$T: ")
-         times = Float64[test(T, 5) for i = 1:5]
-         println("$times, median=$(median(times))")
+function run_all()
+    for test in [test_ins, test_del, test_ins_del]
+        println(test)
+        println("="^length(string(test)))
+        for T in [Dict, OrderedDict]
+            print("$T: ")
+            times = Float64[test(T, 5) for i = 1:5]
+            println("$times, median=$(median(times))")
+        end
+        println()
     end
-    println()
 end
