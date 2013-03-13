@@ -8,10 +8,14 @@ for i = 1:factorial(5)
 end
 @test length(od) == factorial(5)
 
-ks = [join(nthperm(split("abcde",""),i)) for i = 1:factorial(5)]
+ks = String[join(nthperm(split("abcde",""),i)) for i = 1:factorial(5)]
 vs = 1:factorial(5)
 od2 = OrderedDict(ks,vs)
-od3 = copy(od2)
+od3 = similar(od2)
+sizehint(od3, length(od2.ht.slots))
+for item in od2
+    push!(od3, item)
+end
 od4 = copy(od2)
 od5 = copy(od2)
 
@@ -59,22 +63,48 @@ empty!(od2)
 
 @test collect(od4) == [(k,v) for (k,v) in zip(ks,vs)]
 
-## TODO: broken
-# io = IOString()
-# serialize(io, od2)
-# seek(io, 0)
-# od3 = deserialize(io)
+## Serialize/deserialize
+io = IOString()
+serialize(io, od4)
+seek(io, 0)
+od6 = deserialize(io)
+@test od4 == od6
 
-## TODO: implement
-# first(od4) == ("abcde", 1)
-# last(od4) == od4[end] == ("edcba", 120)
-# reverse(od3)
+# first, last, reverse
+@test first(od4) == od4[1] == ("abcde", 1)
+@test last(od4) == od4[end] == ("edcba", 120)
+@test reverse!(od4) == reverse(od5)
+@test reverse!(od4) == od5
 
-push!(od4, ("hi", 0))
+# push, pop, shift, unshift
+@test push!(od4, ("hi", 0)) == ("hi", 0)
 @test od4[length(od4)] == ("hi", 0)
-unshift!(od4, ("bye", 100))
+@test unshift!(od4, ("bye", 100)) == ("bye", 100)
 @test od4[1] == ("bye", 100)
 
 @test pop!(od4) == ("hi", 0)
 @test shift!(od4) == ("bye", 100)
 @test od4 == od5
+
+# Comparison with, construction from Dict
+d = Dict(ks,vs)
+@test d == od4  # should this be true???
+@test od4 == d  # should this be true???
+
+# Sorting
+odd = OrderedDict(d)
+sort!(odd)
+sd = sort(d)
+
+@test odd == sd
+@test keys(odd) == ks
+@test keys(sd) == ks
+@test values(odd) == vs
+@test values(sd) == vs
+
+sort!(odd, Sort.Reverse)
+@test keys(odd) == reverse(ks)
+@test values(odd) == reverse(vs)
+
+sortby!(odd, x -> odd[x])  # sort by value
+@test odd == sd
