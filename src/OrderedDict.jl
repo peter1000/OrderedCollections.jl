@@ -101,7 +101,6 @@ type OrderedDict{K,V} <: Associative{K,V}
     ndel::Int
     odel::Int
     count::Int
-    deleter::Function
 
     function OrderedDict()
         n = 16
