@@ -8,12 +8,13 @@
 #
 # In addition, many of the Dequeue-related functions are available:
 #
-#   push!(od, (k,v))     # Adds (k,v) to the end of the dictionary
-#   pop!(od)             # Removes and returns the last key-value pair
-#   unshift!(od, (k,v))  # Adds (k,v) to the front of the dictionary
-#   shift!(od)           # Removes and returns the first key-value pair
-#   append!(od, items)   # Adds (k,v) pairs from items to the end of
-#                        # the dictionary
+#   push!(od, (k,v))      # Adds (k,v) to the end of the dictionary
+#   pop!(od)              # Removes and returns the last key-value pair
+#   unshift!(od, (k,v))   # Adds (k,v) to the front of the dictionary
+#   shift!(od)            # Removes and returns the first key-value pair
+#   insert!(od, i, (k,v)) # Inserts (k,v) at position i
+#   append!(od, items)    # Adds (k,v) pairs from items to the end of
+#                         # the dictionary
 #
 # Note also that this is not a sorted dictionary, although it can be
 # sorted with 
@@ -28,6 +29,16 @@
 #   od = sort(d)         # d is a Dict; returns a sorted OrderedDict
 #   #sort!(d)            # error! Dicts can't be sorted in place!
 #
+# Additional AbstractArray-like features
+#
+#   indexof(od, key)     # returns the index of key according to the current order
+#   getitem(od, 2)       # returns the second (k,v) pair according to the current order
+#   od[2]                # same, but only works for OrderedDicts where the
+#                        # keys are not Numbers
+#   first(od) == od[1]   
+#   last(od) == od[end]
+#   reverse!(od)         # reverses od in-place
+#   reverse(od)          # creates a reversed copy of od
 
 # Construction
 import Base.similar, Base.sizehint
@@ -42,7 +53,8 @@ import Base.start, Base.next, Base.done
 import Base.isempty, Base.empty!, Base.length
 
 # Indexable Collections
-import Base.setindex!, Base.getindex
+import Base.setindex!, Base.getindex, Base.first, Base.last, Base.endof, Base.reverse, Base.reverse!,
+       Base.findfirst, Base.findnext
 
 # Associative Collections
 import Base.has, Base.get, Base.getkey, Base.delete!
@@ -53,6 +65,7 @@ import Base.push!, Base.pop!, Base.unshift!, Base.shift!, Base.append!, Base.ins
 # Useful, unexported by Base
 import Base.findnextnot, Base.findfirstnot   ## from bitarray.jl
 import Base._tablesz, Base.hashindex         ## from dict.jl
+import Base.serialize_type
 
 # Sorting
 
@@ -85,7 +98,12 @@ export OrderedDict,
     sortby!,
     sortperm,
     indexof,
-    getitem
+    getitem, 
+    first,
+    last,
+    endof,
+    reverse,
+    reverse!
 
 
 ######################
@@ -124,6 +142,9 @@ OrderedDict(ks, vs) = OrderedDict{Any,Any}(ks, vs)
 OrderedDict{K,V}(ks::(K...), vs::(V...)) = OrderedDict{K  ,V  }(ks, vs)
 OrderedDict{K  }(ks::(K...), vs::Tuple ) = OrderedDict{K  ,Any}(ks, vs)
 OrderedDict{V  }(ks::Tuple , vs::(V...)) = OrderedDict{Any,V  }(ks, vs)
+OrderedDict{K,V}(kvs::AbstractArray{(K,V)}) = OrderedDict{K,V}(zip(kvs...)...)
+#OrderedDict{K,V}(d::Associative{K,V}) = OrderedDict{K,V}(collect(d))  ## Why doesn't this work?
+OrderedDict{K,V}(d::Associative{K,V}) = OrderedDict(collect(d))
 
 ##########################
 ## Construction-related ##
@@ -438,6 +459,13 @@ function indexof{K,V}(h::OrderedDict{K,V}, key, deflt)
     return (index<0) ? deflt : (_compact(h); h.ord_idxs[index])
 end
 
+findfirst(h::OrderedDict, v) = indexof(h, v, 0)
+findnext(h::OrderedDict, v, start) = (idx=indexof(h,v,0); idx >= start? idx : 0)
+ 
+first(h::OrderedDict) = getitem(h, 1)
+last(h::OrderedDict) = getitem(h, length(h))
+endof(h::OrderedDict) = length(h)
+
 #############################
 ## Associative Collections ##
 
@@ -489,6 +517,23 @@ delete!{K<:Number,V}(h::OrderedDict{K,V}, key::Integer) = invoke(delete!, (Order
 function delete!(h::OrderedDict, key, default)
     index = ht_keyindex(h, key)
     index > 0 ? _delete!(h, index) : default
+end
+
+function reverse!(h::OrderedDict)
+    _compact(h)
+    reverse!(h.ord)
+    _update_order(h, 1, length(h))
+    h
+
+
+function reverse(h::OrderedDict)
+    d = similar(h)
+    sizehint(d, length(h.ht.slots))
+    _compact(h)
+    for item in reverse(h.ord)
+        d[item.k] = item.v
+    end
+    d
 end
 
 ##################
@@ -586,13 +631,13 @@ end
 function sort{K,V}(h::Dict{K,V}, args...)
     d = OrderedDict{K,V}()
     sizehint(d, length(h.slots))
-    for k in sort(keys(h))
+    for k in sort(keys(h), args...)
         d[k] = h[k]
     end
     d
 end
 
-sortperm(v::OrderedDict, args...) = sortperm(v.keys[v.ord], args...)
+sortperm(v::OrderedDict, args...) = sortperm(keys(v), args...)
 
 # TODO: with multiple inheritance (or simplification of the sort module)
 # almost everything below could be removed
