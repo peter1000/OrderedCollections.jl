@@ -1,7 +1,5 @@
-module OrderedDict2
 
 importall Base
-
 export OrderedDict,
     similar,
     isless,
@@ -67,6 +65,7 @@ end
 isempty(t::AbstractOrderedDict) = isempty(t.ht)
 length(t::AbstractOrderedDict) = length(t.ht) # == t.ht.count
 
+_empty!{K,V}(h::AbstractOrderedDict{K,V}) = empty!(h.ht)
 
 # SimpleOrderedDict
 
@@ -99,15 +98,24 @@ similar{K,V}(d::SimpleOrderedDict{K,V}) = SimpleOrderedDict{K,V}()
 
 # Utility functions
 
-function fixidx{K,V}(ord::AbstractVector{Enumerable}, start::Int, stop::Int)
-    for i = start:stop
+function _delete!(ord::Vector{Enumerable}, i::Integer)
+    delete!(ord, i)
+    for idx = i:endof(ord)
         ord[i].idx = i
     end
 end
 
+function _delete!{T<:Integer}(ord::Vector{Enumerable}, r::Range{T})
+    delete!(ord, r)
+    for idx = first(r).:endof(ord)
+        ord[i].idx = i
+    end
+end
+
+
 # Dict functions
 
-empty!{K,V}(h::SimpleOrderedDict{K,V}) = (empty!(h.ht); empty!(h.order); h)
+empty!{K,V}(h::SimpleOrderedDict{K,V}) = (empty!(h.ht); _empty!(h.order); h)
 
 function setindex!{K,V}(h::SimpleOrderedDict{K,V}, v, key)
     key = convert(K, key)
@@ -123,23 +131,23 @@ function setindex!{K,V}(h::SimpleOrderedDict{K,V}, v, key)
     v
 end
 
+_delete!(h::SimpleOrderedDict, key) = delete!(h.ht, key)
+
 function delete!(h::SimpleOrderedDict, key)
     item = delete!(h.ht, key)
-    delete!(h.order, item.idx)
-    fixidx(h.order, item.idx, endof(h.order))
+    _delete!(h.order, item.idx)
     item.value
 end
 
 #delete!(h::SimpleOrderedDict, key, default) = has(h.ht, key) ? delete!(h, key) : default
-## TODO: decide whether to use the version of get above or below
+## TODO: decide whether to use the version of delete! above or below
 ##       above: two hash lookups
 ##       below: one hash lookup, but depends on structure of Dict
 function delete!(h::SimpleOrderedDict, key, default)
     index = Base.ht_keyindex(h.ht, key)
     if index > 0 
         item = Base._delete!(h.ht, index)
-        delete!(h.order, item.idx)
-        fixidx(h.order, item.idx, endof(h.order))
+        _delete!(h.order, item.idx)
         item.value
     else
         default
@@ -150,4 +158,58 @@ start(t::SimpleOrderedDict) = start(t.order)
 done(t::SimpleOrderedDict, i) = done(t.order, i)
 next(t::SimpleOrderedDict, i) = ((item, n) = next(t.order, i); ((item.key, item.value), n))
 
-end # module
+
+abstract AbstractDictOrdering <: AbstractArray
+
+type DO{K,V,OD<:AbstractOrderedDict} <: AbstractDictOrdering
+    v::Vector{OrderedDictItem{K,V}}
+    dict::OD
+end
+
+# Iteration
+start(o::DO) = start(o.v)
+done(o::DO,i) = done(o.v, i)
+next(o::DO,i) = ((item, ii) = next(o.v,i); ((item.key, item.value), ii))
+
+isempty(o::DO) = isempty(d)
+_empty!(o::DO) = empty(o.v)
+empty!(o::DO) = (empty!(o.v); _empty!(o.d); o)
+
+size(a::DO) = size(a.v)
+length(a::DO) = length(a.v)
+endof(a::DO) = length(a.v)
+
+contains(o::DO, x) = contains(o.v, x)
+findin(a,b) = findin(a.v, b)
+unique(o::DO) = o # TODO: copy?
+reduce(o::DO, v0, op) = reduce(o.v, v0, op)
+max(o::DO) = max(o.v)
+min(o::DO) = min(o.v)
+
+delete!(o::DO, idx::Real) = (item = delete!(o.v, idx); _delete!(o.d, item.key); (item.key, item.value))
+#TODO: add Dequeue operations
+#push!
+#pop!
+#unshift!
+#shift!
+#prepend!
+#append!
+#eltype
+#sizehint
+
+# TODO: delegate dict operations which don't conflict?
+#get
+#getkey
+#getitem
+#keys
+#values
+#collect
+#merge
+#merge!
+#filter
+#filter!
+
+
+
+getindex(a::DO) = getindex(a.v)
+setindex!(a::DO, args...) = setindex!(a, args...)
