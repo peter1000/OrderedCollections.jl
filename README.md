@@ -16,12 +16,13 @@ updated, and the key remains in its original position.
 In addition, many `Dequeue`-related functions are available:
 
 ```julia
-  push!(od, (k,v))     # Adds (k,v) to the end of the dictionary
-  pop!(od)             # Removes and returns the last key-value pair
-  unshift!(od, (k,v))  # Adds (k,v) to the front of the dictionary
-  shift!(od)           # Removes and returns the first key-value pair
-  append!(od, items)   # Adds (k,v) pairs from items to the end of
-                       # the dictionary
+  push!(od, (k,v))       # Adds (k,v) to the end of the dictionary
+  pop!(od)               # Removes and returns the last key-value pair
+  unshift!(od, (k,v))    # Adds (k,v) to the front of the dictionary
+  shift!(od)             # Removes and returns the first key-value pair
+  insert!(od, i, (k,v))  # Insert (k,v) at position i
+  append!(od, items)     # Adds (k,v) pairs from items to the end of
+                         # the dictionary
 ```
 
 Note also that this is not necessarily a sorted dictionary, although

@@ -19,30 +19,24 @@ export OrderedDict,
     isempty,
     length
 
-# Enumerable type is required to generalize the enumerabilty of items held in an OrderedDict
+##################
+# Abstractions
 
-abstract Enumerable 
-    ## Assumed to contain:
-    # idx
+abstract OrderedItem
+    ## Members:
+    #    idx::Int
+abstract AbstractDictOrdering
+abstract AbstractOrderedDict{K,V,Ord<:AbstractDictOrdering} <: Associative{K,V}
+    ## Members:
+    #    ht::Dict{K,OrderedDictItem{K,V}}
 
-indexof(item::Enumerable) = item.idx
+#################
+# Ordered Items #
 
-# OrderedDictItem
+indexof(item::OrderedItem) = item.idx
 
-type OrderedDictItem{K,V} <: Enumerable
-    key::K
-    value::V
-    idx::Int
-end
-
-isless(a::OrderedDictItem, b::OrderedDictItem) = isless(a.key, b.key)
-
-
-# OrderedDict
-
-AbstractOrderedDict{K,V,Ord<:AbstractVector} <: Associative{K,V}
-## Assumed to contain
-#    ht::Dict{K,OrderedDictItem{K,V}}
+#######################
+# AbstractOrderedDict #
 
 # Delegate functions
 sizehint(d::AbstractOrderedDict, newsz) = sizehint(d.ht, newsz)
@@ -67,13 +61,92 @@ length(t::AbstractOrderedDict) = length(t.ht) # == t.ht.count
 
 _empty!{K,V}(h::AbstractOrderedDict{K,V}) = empty!(h.ht)
 
+###################
+# OrderedDictItem #
+
+type OrderedDictItem{K,V} <: OrderedItem
+    key::K
+    value::V
+    idx::Int
+end
+
+isless(a::OrderedDictItem, b::OrderedDictItem) = isless(a.key, b.key)
+show(io::IO, a::OrderedDictItem) = print(io, string(a.key,"=>",a.value))
+
+# Iteration, to allow destructuring
+start(a::OrderedDictItem) = 1
+done(a::OrderedDictItem, i) = (i > 2)
+next(a::OrderedDictItem, i) = (i == 1 ? a.key : a.value, i+1)
+
+################
+# DictOrdering #
+
+type SimpleDictOrdering{K,V} <: AbstractDictOrdering
+    v::Vector{OrderedDictItem{K,V}}
+    dict::AbstractOrderedDict{K,V}
+
+    SimpleDictOrdering(d::AbstractOrderedDict{K,V}) = new(Array(OrderedDictItem{K,V},0), d)
+end
+
+# Iteration
+start(o::SimpleDictOrdering) = start(o.v)
+done(o::SimpleDictOrdering,i) = done(o.v,i)
+next(o::SimpleDictOrdering,i) = next(o.v,i)
+
+isempty(o::SimpleDictOrdering) = isempty(o.dict)
+_empty!(o::SimpleDictOrdering) = empty!(o.v)
+empty!(o::SimpleDictOrdering) = (empty!(o.v); _empty!(o.dict); o)
+
+size(o::SimpleDictOrdering) = size(o.v)
+length(o::SimpleDictOrdering) = length(o.v)
+endof(o::SimpleDictOrdering) = length(o.v)
+
+contains(o::SimpleDictOrdering, x) = contains(o.v, x)
+#findin(a,b) = findin(a.v, b) # TODO: what should this do
+unique(o::SimpleDictOrdering) = o # TODO: copy?
+reduce(o::SimpleDictOrdering, v0, op) = reduce(o.v, v0, op)
+max(o::SimpleDictOrdering) = max(o.v)
+min(o::SimpleDictOrdering) = min(o.v)
+
+delete!(o::SimpleDictOrdering, idx::Real) = (item = delete!(o.v, idx); _delete!(o.dict, item.key); item)
+
+getindex(a::SimpleDictOrdering) = getindex(a.v)
+#setindex!(a::SimpleDictOrdering, args...) = setindex!(a, args...)
+
+# TODO: add Dequeue operations
+#push!
+#pop!
+#unshift!
+#shift!
+#prepend!
+#append!
+#insert!
+#eltype
+#sizehint
+
+# TODO: delegate dict operations which don't conflict?
+#get
+#getkey
+#getitem
+#keys
+#values
+#collect
+#merge
+#merge!
+#filter
+#filter!
+
+
+###############
+# OrderedDict #
+
 # SimpleOrderedDict
 
-type SimpleOrderedDict{K,V} <: AbstractOrderedDict{K,V,Vector}
+type SimpleOrderedDict{K,V} <: AbstractOrderedDict{K,V,SimpleDictOrdering}
     ht::Dict{K,OrderedDictItem{K,V}}
-    order::Vector{OrderedDictItem{K,V}}
+    order::SimpleDictOrdering{K,V}
 
-    SimpleOrderedDict() = new(Dict{K,OrderedDictItem{K,V}}(), Array(OrderedDictItem{K,V},0))
+    SimpleOrderedDict() = (x = new(); x.ht = Dict{K,OrderedDictItem{K,V}}(); x.order = SimpleDictOrdering{K,V}(x))
     function SimpleOrderedDict(ks, vs)
         n = length(ks)
         h = SimpleOrderedDict{K,V}()
@@ -98,14 +171,14 @@ similar{K,V}(d::SimpleOrderedDict{K,V}) = SimpleOrderedDict{K,V}()
 
 # Utility functions
 
-function _delete!(ord::Vector{Enumerable}, i::Integer)
+function _delete!(ord::Vector{Ordered}, i::Integer)
     delete!(ord, i)
     for idx = i:endof(ord)
         ord[i].idx = i
     end
 end
 
-function _delete!{T<:Integer}(ord::Vector{Enumerable}, r::Range{T})
+function _delete!{T<:Integer}(ord::Vector{Ordered}, r::Range{T})
     delete!(ord, r)
     for idx = first(r).:endof(ord)
         ord[i].idx = i
@@ -156,60 +229,6 @@ end
 
 start(t::SimpleOrderedDict) = start(t.order)
 done(t::SimpleOrderedDict, i) = done(t.order, i)
-next(t::SimpleOrderedDict, i) = ((item, n) = next(t.order, i); ((item.key, item.value), n))
+next(t::SimpleOrderedDict, i) = next(t.order, i)
 
 
-abstract AbstractDictOrdering <: AbstractArray
-
-type DO{K,V,OD<:AbstractOrderedDict} <: AbstractDictOrdering
-    v::Vector{OrderedDictItem{K,V}}
-    dict::OD
-end
-
-# Iteration
-start(o::DO) = start(o.v)
-done(o::DO,i) = done(o.v, i)
-next(o::DO,i) = ((item, ii) = next(o.v,i); ((item.key, item.value), ii))
-
-isempty(o::DO) = isempty(d)
-_empty!(o::DO) = empty(o.v)
-empty!(o::DO) = (empty!(o.v); _empty!(o.d); o)
-
-size(a::DO) = size(a.v)
-length(a::DO) = length(a.v)
-endof(a::DO) = length(a.v)
-
-contains(o::DO, x) = contains(o.v, x)
-findin(a,b) = findin(a.v, b)
-unique(o::DO) = o # TODO: copy?
-reduce(o::DO, v0, op) = reduce(o.v, v0, op)
-max(o::DO) = max(o.v)
-min(o::DO) = min(o.v)
-
-delete!(o::DO, idx::Real) = (item = delete!(o.v, idx); _delete!(o.d, item.key); (item.key, item.value))
-#TODO: add Dequeue operations
-#push!
-#pop!
-#unshift!
-#shift!
-#prepend!
-#append!
-#eltype
-#sizehint
-
-# TODO: delegate dict operations which don't conflict?
-#get
-#getkey
-#getitem
-#keys
-#values
-#collect
-#merge
-#merge!
-#filter
-#filter!
-
-
-
-getindex(a::DO) = getindex(a.v)
-setindex!(a::DO, args...) = setindex!(a, args...)
