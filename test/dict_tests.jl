@@ -64,11 +64,11 @@ function test_del(T::Type, iter::Int)
    t
 end
 
-function run_all()
+function run_all(dict_types)
     for test in [test_ins, test_del, test_ins_del]
         println(test)
         println("="^length(string(test)))
-        for T in [Dict, OrderedDict]
+        for T in dict_types
             print("$T: ")
             times = Float64[test(T, 5) for i = 1:5]
             println("$times, median=$(median(times))")
@@ -76,3 +76,5 @@ function run_all()
         println()
     end
 end
+
+run_all() = run_all([Dict])
