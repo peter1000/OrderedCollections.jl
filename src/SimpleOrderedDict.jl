@@ -92,26 +92,21 @@ _empty!{K,V}(h::AbstractOrderedDict{K,V}) = empty!(h.ht)
 empty!{K,V}(h::AbstractOrderedDict{K,V}) = (empty!(h.ht); _empty!(h.order); h)
 
 function setindex!{K,V}(h::AbstractOrderedDict{K,V}, v, key)
-    key = convert(K, key)
-    v   = convert(V, v)
-    
-    # current = get(h.ht, key, nothing)
-
-    # if current != nothing
-    #     current.value = v
-    #     return v
-    # end
-    
+    Base.check_rehash(h.ht)
     # # Avoid extra hash calculation
     index = Base.ht_keyindex(h.ht, key)
-    if index > 0
-        hashvalue(h.ht, index).value = v
-        return v
+
+    if index < 0
+        item = OrderedDictItem{K,V}(key, v, endof(h.order)+1)
+        Base.ht_setindex!(h.ht, item, key, index)
+        _push!(h.order, item)
+    elseif index > 0
+        Base.ht_getindex(h.ht, index).value = v
+    else
+        Base.rehash(h.ht)
+        return setindex!(h, v, key)
     end
 
-    item = OrderedDictItem{K,V}(key, v, endof(h.order)+1)
-    h.ht[key] = item
-    _push!(h.order, item)
     v
 end
 
