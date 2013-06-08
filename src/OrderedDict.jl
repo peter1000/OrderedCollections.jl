@@ -144,7 +144,7 @@ empty!(h::DictOrdering) = empty!(h.items)
 getindex{K,V}(h::DictOrdering{K,V}, idx::Real) = getindex(h.items, idx)::(K,V)
 getindex{K,V}(h::DictOrdering{K,V}, r::Range) = [d::(K,V) for d in getindex(h.items, r)]
 
-setindex!{K,V}(h::DictOrdering{K,V}, ) = setindex!(h.items, d, idx)
+setindex!{K,V}(h::DictOrdering{K,V}, d, idx::Real) = setindex!(h.items, d, idx)
 function setindex!{K,V}(h::DictOrdering{K,V}, kv::(Any,Any), index::Real)
     (key,v) = kv
     if indexof(h,key,0) == index
@@ -222,6 +222,8 @@ function shift!{K,V}(d::DictOrdering{K,V})
 end
 
 # TODO: prepend
+function prepend!{K,V}(h::DictOrdering{K,V}, items)
+    
 
 # Add multiple items to dictionary, at end
 function append!{K,V}(h::DictOrdering{K,V}, items)
@@ -470,7 +472,7 @@ last(h::OrderedDict) = h.order[length(h)]
 endof(h::OrderedDict) = length(h)
 
 reverse!(h::OrderedDict) = reverse!(h.order)
-reverse(h::OrderedDict) = reverse(h.order)
+#reverse(h::OrderedDict) = reverse(h.order)
 
 
 #############################
