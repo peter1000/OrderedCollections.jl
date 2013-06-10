@@ -57,27 +57,23 @@ import Base.setindex!, Base.getindex, Base.first, Base.last, Base.endof, Base.re
        Base.findfirst, Base.findnext
 
 # Associative Collections
-import Base.has, Base.get, Base.getkey, Base.delete!
+import Base.haskey, Base.get, Base.getkey, Base.delete!, Base.splice!
 
 # Dequeue-like
 import Base.push!, Base.pop!, Base.unshift!, Base.shift!, Base.append!, Base.insert!
 
-# Useful, unexported by Base
-import Base.findnextnot, Base.findfirstnot   ## from bitarray.jl
-import Base._tablesz, Base.hashindex         ## from dict.jl
-import Base.serialize_type
-
 # Sorting
 
-import Base.sort!, Base.sort, Base.sortby!, Base.sortby, Base.sortperm
-import Sort.DEFAULT_UNSTABLE, Sort.DEFAULT_STABLE,
-       Sort.Ordering, Sort.Algorithm, 
-       Sort.Forward, Sort.Reverse,
-       Sort.By, Sort.Lt, Sort.lt
+# import Base.sort!, Base.sort, Base.sortby!, Base.sortby, Base.sortperm
+# import Sort.DEFAULT_UNSTABLE, Sort.DEFAULT_STABLE,
+#        Sort.Ordering, Sort.Algorithm, 
+#        Sort.Forward, Sort.Reverse,
+#        Sort.By, Sort.Lt, Sort.lt
 
 # Exports
 
 export OrderedDict,
+    OrderedDictBase,
     similar,
     sizehint,
     start,
@@ -105,427 +101,238 @@ export OrderedDict,
     reverse,
     reverse!
 
+# by JMW
+macro delegate(source, targets)
+    typename = esc(source.args[1])
+    fieldname = esc(Expr(:quote, source.args[2].args[1]))
+    funcnames = targets.args
+    n = length(funcnames)
+    fdefs = Array(Any, n)
+    for i in 1:n
+        funcname = esc(funcnames[i])
+        fdefs[i] = quote
+                     ($funcname)(a::($typename), args...) =
+                       ($funcname)(a.($fieldname), args...)
+                   end
+    end
+    return Expr(:block, fdefs...)
+end
+#
 
-###################
-## DictItem type ##
+# jb (from graphics.jl)
+macro mustimplement(sig)
+    fname = sig.args[1]
+    arg1 = sig.args[2]
+    if isa(arg1,Expr)
+        arg1 = arg1.args[1]
+    end
+    :($(esc(sig)) = error(typeof($(esc(arg1))),
+                          " must implement ", $(Expr(:quote,fname))))
+end
 
-type DictItem{K,V} <: (K,V)
+#####################
+## OrderedDictBase ##
+
+abstract DictItem{K,V}
+
+type OrderedDictBase{K,V,Item<:DictItem,Itr} <: Associative{K,V}
+    ht::Dict{K,Item} # really: Item{K,V}
+    order::Itr       # really: Itr{Item{K,V}}
+
+    OrderedDictBase() = OrderedDictBase(K,V,Item,Itr)  # type callback
+    OrderedDictBase(ht::Dict{K,Item}, order::Itr) = new(ht, order)
+end
+
+function OrderedDictBase{K,V,Item<:DictItem,Itr}(ht::Dict{K,Item}, order::Itr, ::Type{V})
+    OrderedDictBase{K,V,Item,Itr}(ht,order)
+end
+
+@delegate OrderedDictBase.ht    [sizehint isempty length haskey getkey]
+@delegate OrderedDictBase.order [start done next]
+
+# The following must be implemented for each DictItem/Iterable combination
+@mustimplement getindex{K,V,Item<:DictItem,Itr}(d::OrderedDictBase{K,V,Item,Itr}, key)
+@mustimplement get{K,V,Item<:DictItem,Itr}(d::OrderedDictBase{K,V,Item,Itr}, key, default)
+@mustimplement setindex!{K,V,Item<:DictItem,Itr}(d::OrderedDictBase{K,V,Item,Itr}, v, key)
+@mustimplement delete!{K,V,Item<:DictItem,Itr}(d::OrderedDictBase{K,V,Item,Itr}, key)
+@mustimplement delete!{K,V,Item<:DictItem,Itr}(d::OrderedDictBase{K,V,Item,Itr}, key, default)
+@mustimplement empty!{K,V,Item<:DictItem,Itr}(d::OrderedDictBase{K,V,Item,Itr})
+
+###################################
+## Vector-based OrderedDict type ##
+
+type VecDictItem{K,V} <: DictItem{K,V}
     k::K
     v::V
-    idx::Int
+    idx::Integer
 end
 
-convert{K,V}(::(K,V), d::DictItem{Any, Any}) = (convert(K,d.k), convert(V,d.v))
+start{K,V}(lst::VecDictItem{K,V}) = 1
+done{K,V}(lst::VecDictItem{K,V}, i) = i>2
+next{K,V}(lst::VecDictItem{K,V}, i) = (i==1?lst.k:lst.v, i+1)
 
-#######################
-## DictOrdering type ##
+#
 
-type DictOrdering{K,V} <: AbstractVector{(K,V)}
-    items::AbstractVector{DictItem{K,V}}
+typealias _OrderedDict{K,V} OrderedDictBase{K,V,VecDictItem,Array}
+
+OrderedDict() = OrderedDict(Any,Any)
+OrderedDict(K::Type, V::Type) = OrderedDictBase{K,V,VecDictItem,Array}()
+
+function OrderedDictBase(K::Type, V::Type, ::Type{VecDictItem}, ::Type{Array})
+    OrderedDictBase{K,V,VecDictItem,Array}(Dict{K,VecDictItem}(),VecDictItem[])
 end
 
-push!{K,V}(h::DictOrdering{K,V}, item::DictItem{K,V}) = push!(h.items, item)
-length(h::DictOrdering) = length(h.ht)
 
-###############
-## Iteration ##
-
-start(h::DictOrdering) = start(h.items)
-done(h::DictOrdering, i) = done(h.items, i)
-next(h::DictOrdering, i) = ((item, state) = next(h, i); ((item.k, item.v), state))
-
-#########################
-## General Collections ##
-
-empty!(h::DictOrdering) = empty!(h.items)
-
-###########################
-## Indexable Collections ##
-getindex{K,V}(h::DictOrdering{K,V}, idx::Real) = getindex(h.items, idx)::(K,V)
-getindex{K,V}(h::DictOrdering{K,V}, r::Range) = [d::(K,V) for d in getindex(h.items, r)]
-
-setindex!{K,V}(h::DictOrdering{K,V}, d, idx::Real) = setindex!(h.items, d, idx)
-function setindex!{K,V}(h::DictOrdering{K,V}, kv::(Any,Any), index::Real)
-    (key,v) = kv
-    if indexof(h,key,0) == index
-        h.items[index].k = v
-        return kv::(K,V)
-    end
-    # TODO: this can made be more efficient
-    delete!(h.ht, h.items[index].k)
-    insert!(h, index, kv)
-end
-
-function reverse!(h::DictOrdering)
-    _compact!(h)
-    reverse!(h.items)
-    _update_order(h, 1, length(h))
-    h.ht # return the actual dictionary
-end
-
-function reverse(h::DictOrdering)
-    d = similar(h.ht)
-    sizehint(d, length(h.ht)<<1)
-    _compact!(h)
-    for item in reverse(h.items)
-        d[item.k] = item.v
-    end
-    d
-end
-
-# Internal: do not compact, return DictItem(k,v,idx)
-function _delete!{K,V}(h::DictOrdering{K,V}, item_idx::Real)
-    item = h.items[item_idx]
-    ccall(:jl_arrayunset, Void, (Any, Uint), h.items, item_idx-1)
-    h.slots[item_idx] = false
-    h.ndel += 1
-    item
-end
-
-# External: compact, return (k, v)
-function delete!{K,V}(h::DictOrdering{K,V}, index::Real)
-    _compact!(h)
-    item = _delete!(h, index)
-    _delete!(h.ht, item.k)
-    (item.k, item.v)::(K,V)
-end
-
-##################
-## Dequeue-like ##
-
-# Add key-value pair at last slot
-push!{K,V}(d::DictOrdering{K,V}, item) = insert!(d, length(d)+1, item)
-
-# Remove and return last key-value pair
-function pop!{K,V}(d::DictOrdering{K,V})
-    if isempty(d)
-        error("pop!: DictOrdering is empty")
-    end
-    _compact!(d)
-    item = _delete!(d, length(d))
-    _delete!(d.ht, item.k)
-    (item.k, item.v)::(K,V)
-end
-
-# Put key-value pair at front of dict
-unshift!{K,V}(d::DictOrdering{K,V}, item) = insert!(d, 1, item)
-
-# Remove and return first key-value pair
-function shift!{K,V}(d::DictOrdering{K,V})
-    if isempty(d)
-        error("shift!: ",typeof(d.ht)," is empty")
-    end
-    idx = findfirst(d.slots)
-    item = _delete!(d, idx)
-    _delete!(d.ht, item.k)
-    (item.k, item.v)::(K,V)
-end
-
-# TODO: prepend
-function prepend!{K,V}(h::DictOrdering{K,V}, items)
-    
-
-# Add multiple items to dictionary, at end
-function append!{K,V}(h::DictOrdering{K,V}, items)
-    for item in items
-        push!(h, item)
-    end
-    items
-end
-
-# Add item to dictionary at a particular linear location
-# Note that if the key already exists in the dictionary, it is removed
-# first, and this might decrement the inserted position by one
-function insert!{K,V}(h::DictOrdering{K,V}, index::Integer, item::(Any,Any))
-    (key,v) = item
-    # Do we need to subtract 1 from index?
-    cur_index = indexof(h, key, 0)
-    if cur_index > 0 && cur_index < index
-        index -= 1
-    end
-    # Add/set the element
-    h.ht[key] = v
-
-    # Shift the element, if necessary
-    cur_index = indexof(h, key)          # calls _compact!()
-    if cur_index == index
-        return item::(K,V)
-    end
-    # _compact!(h)  ## called in indexof() above...
-    _move_item!(h.items, cur_index, index)
-    _update_order(h, index, cur_index)
-    item::(K,V)
-end
-
-####################################
-## DictOrdering Utility functions ##
-
-indexof{K,V}(h::DictOrdering{K,V}, key)        = (_compact!(h); _getitem(h.ht, key).idx)
-indexof{K,V}(h::DictOrdering{K,V}, key, deflt) = has(h.ht, key) ? indexof(h, key) : deflt
-
-# Removes empty slots of order array in OrderedDict
-function _compact!(h::DictOrdering)
-    h.ndel == 0 && return
-
-    items = h.items
-    slots = h.slots
-
-    # start with first empty slot
-    s_pos = findfirstnot(slots)
-    i_pos = findnext(slots, s_pos)
-    
-    # fill down empty slots with consecutive filled slots
-    while i_pos != 0
-        item = items[s_pos] = items[i_pos]
-        item.idx = s_pos
-        
-        if i_pos == endof(items) break end
-
-        s_pos += 1
-        i_pos = findnext(slots, i_pos+1)
-    end
-    
-    new_sz = length(h)
-    resize!(h.items, new_sz)
-    resize!(h.slots, new_sz)
-    slots[1:end] = true
-    h.ndel = 0
-
-    nothing
-end
-
-function _update_order(h::DictOrdering, first, last)
+# Utility function to fix item order
+function update_item_order(h::_OrderedDict, first::Int, last::Int)
     if first > last
         (first, last) = (last, first)
     end
 
     for i = first:last
-        h.items[i].idx = i
+        h.order[i].idx = i
     end
-end
 
-# move item in a from a[from] to a[to], shifting elements as needed
-function _move_item!{T}(a::AbstractArray{T}, from, to)
-    item = a[from]
-    if from < to
-        for i = from:to-1
-            a[i] = a[i+1]
-        end
-    elseif from > to
-        for i = from:-1:to+1
-            a[i] = a[i-1]
-        end
-    end
-    a[to] = item
     nothing
 end
+update_item_order(h::_OrderedDict) = update_item_order(h, 1, length(h.order))
 
-# Sorting
-import Sort.Ordering, Sort.Algorithm
+# required
+getindex{K,V}(h::_OrderedDict{K,V}, key) = getindex(h.ht, key).v
 
-function sort!(h::DictOrdering, args...)
-    _compact!(h)
-    p = sortperm(keys(h.ht), args...)
-    h.items[:] = h.items[p]
-    _update_order(h, 1, length(h))
-    h.ht
+# required
+function get{K,V}(d::_OrderedDict{K,V}, key, default)
+    item = get(d.ht, key, Base.secret_table_token)
+    if is(item, Base.secret_table_token)
+        return default
+    end
+    item.v
 end
+    
 
-# Force stable sort by default, even for numerical keys
-sort!{K<:Number,V}(h::DictOrdering{K,V}, o::Ordering) = sort!(h, DEFAULT_STABLE, o)
-sort {K<:Number,V}(h::DictOrdering{K,V}, o::Ordering) = sort (h, DEFAULT_STABLE, o)
-
-sortperm(h::DictOrdering, args...) = sortperm(keys(h.ht), args...)
-
-######################
-## OrderedDict type ##
-
-type OrderedDict{K,V} <: Associative{K,V}
-    ht::Dict{K,DictItem{K,V}}
-    order::DictOrdering{K,V,OrderedDict{K,V}}
-
-    function OrderedDict()
-        d = new()
-        d.ht = Dict{K,DictItem{K,V}}()
-        d.order = DictOrdering{K,V,OrderedDict{K,V}}(similar(Array(DictItem{K,V},1), 0), BitArray(), 0, d)
-        d
-    end
-    function OrderedDict(ks,vs)
-        d = OrderedDict{K,V}()
-        for (i, (k, v)) in enumerate(zip(ks, vs))
-            item = DictItem{K,V}(k,v,i)
-            d.ht[k] = item
-            _push!(d.order, item)
-        end
-        d
-    end
-end
-OrderedDict() = OrderedDict{Any, Any}()
-OrderedDict(ks, vs) = OrderedDict{Any,Any}(ks, vs)
-OrderedDict{K,V}(ks::AbstractArray{K}, vs::AbstractArray{V}) = OrderedDict{K,V}(ks, vs)
-
-# syntax entry points
-OrderedDict{K,V}(ks::(K...), vs::(V...)) = OrderedDict{K  ,V  }(ks, vs)
-OrderedDict{K  }(ks::(K...), vs::Tuple ) = OrderedDict{K  ,Any}(ks, vs)
-OrderedDict{V  }(ks::Tuple , vs::(V...)) = OrderedDict{Any,V  }(ks, vs)
-OrderedDict{K,V}(kvs::AbstractArray{(K,V)}) = OrderedDict{K,V}(zip(kvs...)...)
-OrderedDict{K,V}(kvs::AbstractArray{DictItem{K,V}}) = OrderedDict{K,V}(zip(kvs...)...)
-#OrderedDict{K,V}(d::Associative{K,V}) = OrderedDict{K,V}(collect(d))  ## Why doesn't this work?
-OrderedDict{K,V}(d::Associative{K,V}) = OrderedDict(collect(d))
-
-##########################
-## Construction-related ##
-similar{K,V}(d::OrderedDict{K,V}) = OrderedDict{K,V}()
-sizehint(d::OrderedDict, newsz) = sizehint(d.ht, newsz)
-
-###################
-## Serialization ##
-
-function serialize(s, t::OrderedDict)
-    serialize_type(s, typeof(t))
-    write(s, int32(length(t)))
-    for (k,v) in t
-        serialize(s, k)
-        serialize(s, v)
-    end
-end
-
-function deserialize{K,V}(s, T::Type{OrderedDict{K,V}})
-    n = read(s, Int32)
-    t = T(); sizehint(t, n)
-    for i = 1:n
-        k = deserialize(s)
-        v = deserialize(s)
-        t[k] = v
-    end
-    return t
-end
-
-###############
-## Iteration ##
-
-start(d::OrderedDict) = start(d.order)
-done(d::OrderedDict, i) = done(d.order, i)
-next(d::OrderedDict, i) = next(d.order, i)
-
-#########################
-## General Collections ##
-
-isempty(d::OrderedDict) = isempty(d.ht)
-length(d::OrderedDict) = length(d.ht)
-empty!(d::OrderedDict) = (empty!(d.ht); empty!(d.order); d)
-
-###########################
-## Indexable Collections ##
-
-getindex{K,V}(h::OrderedDict{K,V}, key) = getindex(h.ht, key).v
-
-function setindex!{K,V}(d::OrderedDict{K,V}, v, key)
-    # 3/4 deleted?
-    if d.order.ndel >= ((3*length(d.order))>>2)
-        _compact!(d.order)
-    end
-
-    if has(d, key)
+# required
+function setindex!{K,V}(d::_OrderedDict{K,V}, v, key)
+    if haskey(d, key)
         d.ht[key].v = v
     else
-        item = DictItem{K,V}(key, v, length(d.order)+1)
+        item = VecDictItem{K,V}(key, v, length(d.order)+1)
         d.ht[key] = item
-        _push!(d.order, item)
+        push!(d.order, item)
     end
     d
 end
 
-# We want to allow the user to access the (k,v) pairs by index
-# However, first and foremost, this is a dictionary, so if the
-# keys are numbers, assume any reference using an integer
-# as a key is attempting a has lookup.
-
-# Note: This might be confusing behavior, so disabled for now.
-#       Use h.order[idx] to access (K,V) pairs by index
-
-# function setindex!{K,V}(h::OrderedDict{K,V}, kv::(Any,Any), index::Integer)
-#     (key,v) = kv
-#     ord_idx = indexof(h,key,0)
-#     if ord_idx == index
-#         return setindex!(h, v, key)
-#     end
-#     # TODO: this can made be more efficient
-#     delete!(h, getitem(h, index)[1])
-#     insert!(h, index, kv)
-# end
-
-# setindex!{K<:Number,V}(h::OrderedDict{K,V}, v::(Any,Any), key::Integer) = 
-#     invoke(setindex!, (OrderedDict{K,V}, Any, Any), h, v, key)
-# setindex!{K<:Number,V}(h::OrderedDict{K,V}, v, key::Integer) = 
-#     invoke(setindex!, (OrderedDict{K,V}, Any, Any), h, v, key)
-
-#getindex{K,        V}(h::OrderedDict{K,V}, ord_idx::Integer) = getitem(h.order, ord_idx)
-#getindex{K<:Number,V}(h::OrderedDict{K,V}, key::Integer)     = getindex(h.ht, key).v
-
-indexof{K,V}(h::OrderedDict{K,V}, args...) = indexof(h.order, args...)
-findfirst(h::OrderedDict, k) = indexof(h, k, 0)
-findnext(h::OrderedDict, k, start::Int) = (idx=indexof(h,k,0); idx >= start? idx : 0)
-
-first(h::OrderedDict) = h.order[1]
-last(h::OrderedDict) = h.order[length(h)]
-endof(h::OrderedDict) = length(h)
-
-reverse!(h::OrderedDict) = reverse!(h.order)
-#reverse(h::OrderedDict) = reverse(h.order)
-
-
-#############################
-## Associative Collections ##
-
-has{K,V}(d::OrderedDict{K,V}, key) = has(d.ht, key)
-
-get{K,V}(d::OrderedDict{K,V}, key, default) = has(d, key) ? d[key] : default
-getkey{K,V}(d::OrderedDict{K,V}, key, default) = has(d, key) ? key : default
-_getitem{K,V}(d::OrderedDict{K,V}, key) = d.ht[key]
-_getitem{K,V}(d::OrderedDict{K,V}, key, default) = has(d, key) ? d.ht[key] : default
-
-_delete!{K,V}(d::OrderedDict{K,V}, key) = delete!(d.ht, key)
-
-function delete!{K,V}(d::OrderedDict{K,V}, key)
+# required
+function delete!{K,V}(d::_OrderedDict{K,V}, key)
     item = delete!(d.ht, key)
-    _delete!(d.order, item.idx)
+    splice!(d.order, item.idx)
+    if item.idx <= length(d.order)
+        update_item_order(d, item.idx, length(d.order))
+    end
     item.v
 end
 
-delete!{K,V}(d::OrderedDict{K,V}, key, default) = has(d, key) ? delete!(d, key) : default
+# required
+function delete!{K,V}(d::_OrderedDict{K,V}, key, default)
+    item = delete!(d.ht, key, Base.secret_table_token)
+    if is(item, Base.secret_table_token)
+        return default
+    end
+    splice!(d.order, item.idx)
+    if item.idx <= length(d.order)
+        update_item_order(d, item.idx, length(d.order))
+    end
+    item.v
+end
 
-#delete!{K,V}(h::OrderedDict{K,V}, ord_idx::Integer) = delete!{K,V}(h.order, ord_idx)
-#delete!{K<:Number,V}(h::OrderedDict{K,V}, key::Integer) = invoke(delete!, (OrderedDict{K,V}, Any), h, key)
+# required
+empty!(d::_OrderedDict) = (empty!(d.ht); empty!(d.order); d)
 
-#############################
-## Delegations...
+############################
+## LinkedOrderedDict type ##
 
-push!(d::OrderedDict, kv) = push!(d.order, kv)
-pop!(d::OrderedDict) = pop!(d.order)
-unshift!(d::OrderedDict, kv) = unshift!(d.order, kv)
-shift!(d::OrderedDict) = shift!(d.order)
-insert!(d::OrderedDict, i::Integer, kv) = insert!(d.order, i, kv)
-append!(d::OrderedDict, kvs) = append!(d.order, kvs)
-#prepend!(d::OrderedDict, kvs) = prepend!(d.order, kvs)
+type LinkedDictItem{K,V} <: DictItem{K,V}
+    k::K
+    v::V
+    prev::LinkedDictItem
+    next::LinkedDictItem
 
-#############
-## Sorting ##
+    # Constructor for empty item
+    LinkedDictItem() = (item = new(); item.prev = item.next = item)
+    LinkedDictItem(k, v) = (item = new(); item.k=convert(K,k); item.v=convert(V,v); item.prev = item.next = item)
+end
 
-sort!(d::OrderedDict, args...) = sort!(d.order, args...)
-sort(d::OrderedDict, args...) = sort!(d.order, args...)
+function push!{K,V}(lst::LinkedDictItem{K,V}, item::LinkedDictItem{K,V})
+    item.prev = lst.prev
+    item.next = lst
+    lst.prev.next = item
+    lst.prev = item
+end
 
-sortby!(d::OrderedDict, args...) = sortby!(d.order, args...)
-sortby(d::OrderedDict, args...) = sortby(d.order, args...)
+function splice!{K,V}(lst::LinkedDictItem{K,V}, item::LinkedDictItem{K,V})
+    item.prev.next = item.next
+    item.next.prev = item.prev
+end
 
-sortperm(d::OrderedDict, args...) = sortperm(d.order, args...)
-sortpermby(d::OrderedDict, args...) = sortpermby(d.order, args...)
+function empty!{K,V}(lst::LinkedDictItem{K,V})
+    item.prev = item.next = item
+end
 
-function sort{K,V}(h::Dict{K,V}, args...)
-    d = OrderedDict{K,V}()
-    sizehint(d, length(h)<<1)
-    for k in sort(keys(h), args...)
-        d[k] = h[k]
+start{K,V}(lst::LinkedDictItem{K,V}) = lst.next
+done{K,V}(lst::LinkedDictItem{K,V}, ptr::LinkedDictItem{K,V}) = is(ptr, lst)
+next{K,V}(lst::LinkedDictItem{K,V}, ptr::LinkedDictItem{K,V}) = ((ptr.k, ptr.v), ptr.next)
+
+##
+
+typealias _LinkedOrderedDict{K,V} OrderedDictBase{K,V,LinkedDictItem,LinkedDictItem}
+
+LinkedOrderedDict() = LinkedOrderedDict(Any,Any)
+LinkedOrderedDict(K::Type, V::Type) = OrderedDictBase{K,V,LinkedDictItem,LinkedDictItem}()
+
+function OrderedDictBase(K::Type, V::Type, ::Type{LinkedDictItem}, ::Type{LinkedDictItem})
+    OrderedDictBase{K,V,LinkedDictItem,LinkedDictItem}(Dict{K,LinkedDictItem}(),LinkedDictItem{K,V}())
+end
+
+# required
+getindex{K,V}(h::_LinkedOrderedDict{K,V}, key) = getindex(h.ht, key).v
+
+# required
+function get{K,V}(d::_LinkedOrderedDict{K,V}, key, default)
+    item = get(d.ht, key, Base.secret_table_token)
+    if is(item, Base.secret_table_token)
+        return default
+    end
+    item.v
+end
+
+# required
+function setindex!{K,V}(d::_LinkedOrderedDict{K,V}, v, key)
+    if haskey(d, key)
+        d.ht[key].v = v
+    else
+        item = LinkedDictItem{K,V}(key, v)
+        d.ht[key] = item
+        push!(d.order, item)
     end
     d
 end
+
+# required
+function delete!{K,V}(d::_LinkedOrderedDict{K,V}, key)
+    item = delete!(d.ht, key)
+    splice!(d.order, item)
+    item.v
+end
+
+# required
+function delete!{K,V}(d::_LinkedOrderedDict{K,V}, key, default)
+    item = delete!(d.ht, key, Base.secret_table_token)
+    if is(item, Base.secret_table_token)
+        return default
+    end
+    splice!(d.order, item)
+    item.v
+end
+
+# required
+empty!{K,V}(d::_LinkedOrderedDict{K,V}) = (empty!(d.ht); empty!(d.order); d)

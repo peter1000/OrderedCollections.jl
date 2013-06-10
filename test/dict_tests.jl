@@ -1,4 +1,4 @@
-n = 100000
+n = 1000
 strs = [randstring(10) for i = 1:n];
 nums = rand(Int, n);
 
