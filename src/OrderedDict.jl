@@ -72,8 +72,10 @@ import Base.push!, Base.pop!, Base.unshift!, Base.shift!, Base.append!, Base.ins
 
 # Exports
 
-export OrderedDict,
+export 
     OrderedDictBase,
+    OrderedDict,
+    ArrayOrderedDict,
     similar,
     sizehint,
     start,
@@ -158,98 +160,8 @@ end
 @mustimplement delete!{K,V,Item<:DictItem,Itr}(d::OrderedDictBase{K,V,Item,Itr}, key, default)
 @mustimplement empty!{K,V,Item<:DictItem,Itr}(d::OrderedDictBase{K,V,Item,Itr})
 
-###################################
-## Vector-based OrderedDict type ##
-
-type VecDictItem{K,V} <: DictItem{K,V}
-    k::K
-    v::V
-    idx::Integer
-end
-
-start{K,V}(lst::VecDictItem{K,V}) = 1
-done{K,V}(lst::VecDictItem{K,V}, i) = i>2
-next{K,V}(lst::VecDictItem{K,V}, i) = (i==1?lst.k:lst.v, i+1)
-
-#
-
-typealias _OrderedDict{K,V} OrderedDictBase{K,V,VecDictItem,Array}
-
-OrderedDict() = OrderedDict(Any,Any)
-OrderedDict(K::Type, V::Type) = OrderedDictBase{K,V,VecDictItem,Array}()
-
-function OrderedDictBase(K::Type, V::Type, ::Type{VecDictItem}, ::Type{Array})
-    OrderedDictBase{K,V,VecDictItem,Array}(Dict{K,VecDictItem}(),VecDictItem[])
-end
-
-
-# Utility function to fix item order
-function update_item_order(h::_OrderedDict, first::Int, last::Int)
-    if first > last
-        (first, last) = (last, first)
-    end
-
-    for i = first:last
-        h.order[i].idx = i
-    end
-
-    nothing
-end
-update_item_order(h::_OrderedDict) = update_item_order(h, 1, length(h.order))
-
-# required
-getindex{K,V}(h::_OrderedDict{K,V}, key) = getindex(h.ht, key).v
-
-# required
-function get{K,V}(d::_OrderedDict{K,V}, key, default)
-    item = get(d.ht, key, Base.secret_table_token)
-    if is(item, Base.secret_table_token)
-        return default
-    end
-    item.v
-end
-    
-
-# required
-function setindex!{K,V}(d::_OrderedDict{K,V}, v, key)
-    if haskey(d, key)
-        d.ht[key].v = v
-    else
-        item = VecDictItem{K,V}(key, v, length(d.order)+1)
-        d.ht[key] = item
-        push!(d.order, item)
-    end
-    d
-end
-
-# required
-function delete!{K,V}(d::_OrderedDict{K,V}, key)
-    item = delete!(d.ht, key)
-    splice!(d.order, item.idx)
-    if item.idx <= length(d.order)
-        update_item_order(d, item.idx, length(d.order))
-    end
-    item.v
-end
-
-# required
-function delete!{K,V}(d::_OrderedDict{K,V}, key, default)
-    item = delete!(d.ht, key, Base.secret_table_token)
-    if is(item, Base.secret_table_token)
-        return default
-    end
-    splice!(d.order, item.idx)
-    if item.idx <= length(d.order)
-        update_item_order(d, item.idx, length(d.order))
-    end
-    item.v
-end
-
-# required
-empty!(d::_OrderedDict) = (empty!(d.ht); empty!(d.order); d)
-
-############################
-## LinkedOrderedDict type ##
+########################################
+## Linked-list based OrderedDict type ##
 
 type LinkedDictItem{K,V} <: DictItem{K,V}
     k::K
@@ -282,22 +194,22 @@ start{K,V}(lst::LinkedDictItem{K,V}) = lst.next
 done{K,V}(lst::LinkedDictItem{K,V}, ptr::LinkedDictItem{K,V}) = is(ptr, lst)
 next{K,V}(lst::LinkedDictItem{K,V}, ptr::LinkedDictItem{K,V}) = ((ptr.k, ptr.v), ptr.next)
 
-##
+######################################
 
-typealias _LinkedOrderedDict{K,V} OrderedDictBase{K,V,LinkedDictItem,LinkedDictItem}
+typealias _OrderedDict{K,V} OrderedDictBase{K,V,LinkedDictItem,LinkedDictItem}
 
-LinkedOrderedDict() = LinkedOrderedDict(Any,Any)
-LinkedOrderedDict(K::Type, V::Type) = OrderedDictBase{K,V,LinkedDictItem,LinkedDictItem}()
+OrderedDict() = OrderedDict(Any,Any)
+OrderedDict(K::Type, V::Type) = OrderedDictBase{K,V,LinkedDictItem,LinkedDictItem}()
 
 function OrderedDictBase(K::Type, V::Type, ::Type{LinkedDictItem}, ::Type{LinkedDictItem})
     OrderedDictBase{K,V,LinkedDictItem,LinkedDictItem}(Dict{K,LinkedDictItem}(),LinkedDictItem{K,V}())
 end
 
 # required
-getindex{K,V}(h::_LinkedOrderedDict{K,V}, key) = getindex(h.ht, key).v
+getindex{K,V}(h::_OrderedDict{K,V}, key) = getindex(h.ht, key).v
 
 # required
-function get{K,V}(d::_LinkedOrderedDict{K,V}, key, default)
+function get{K,V}(d::_OrderedDict{K,V}, key, default)
     item = get(d.ht, key, Base.secret_table_token)
     if is(item, Base.secret_table_token)
         return default
@@ -306,7 +218,7 @@ function get{K,V}(d::_LinkedOrderedDict{K,V}, key, default)
 end
 
 # required
-function setindex!{K,V}(d::_LinkedOrderedDict{K,V}, v, key)
+function setindex!{K,V}(d::_OrderedDict{K,V}, v, key)
     if haskey(d, key)
         d.ht[key].v = v
     else
@@ -318,14 +230,14 @@ function setindex!{K,V}(d::_LinkedOrderedDict{K,V}, v, key)
 end
 
 # required
-function delete!{K,V}(d::_LinkedOrderedDict{K,V}, key)
+function delete!{K,V}(d::_OrderedDict{K,V}, key)
     item = delete!(d.ht, key)
     splice!(d.order, item)
     item.v
 end
 
 # required
-function delete!{K,V}(d::_LinkedOrderedDict{K,V}, key, default)
+function delete!{K,V}(d::_OrderedDict{K,V}, key, default)
     item = delete!(d.ht, key, Base.secret_table_token)
     if is(item, Base.secret_table_token)
         return default
@@ -335,4 +247,96 @@ function delete!{K,V}(d::_LinkedOrderedDict{K,V}, key, default)
 end
 
 # required
-empty!{K,V}(d::_LinkedOrderedDict{K,V}) = (empty!(d.ht); empty!(d.order); d)
+empty!{K,V}(d::_OrderedDict{K,V}) = (empty!(d.ht); empty!(d.order); d)
+
+
+###################################
+## Vector-based OrderedDict type ##
+
+type ArrayDictItem{K,V} <: DictItem{K,V}
+    k::K
+    v::V
+    idx::Integer  # Item location in array
+end
+
+start{K,V}(lst::ArrayDictItem{K,V}) = 1
+done{K,V}(lst::ArrayDictItem{K,V}, i) = i>2
+next{K,V}(lst::ArrayDictItem{K,V}, i) = (i==1?lst.k:lst.v, i+1)
+
+#
+
+typealias _ArrayOrderedDict{K,V} OrderedDictBase{K,V,ArrayDictItem,Array}
+
+ArrayOrderedDict() = ArrayOrderedDict(Any,Any)
+ArrayOrderedDict(K::Type, V::Type) = OrderedDictBase{K,V,ArrayDictItem,Array}()
+
+function OrderedDictBase(K::Type, V::Type, ::Type{ArrayDictItem}, ::Type{Array})
+    OrderedDictBase{K,V,ArrayDictItem,Array}(Dict{K,ArrayDictItem}(),ArrayDictItem[])
+end
+
+
+# Utility function to fix item order
+function update_item_order(h::_ArrayOrderedDict, first::Int, last::Int)
+    if first > last
+        (first, last) = (last, first)
+    end
+
+    for i = first:last
+        h.order[i].idx = i
+    end
+
+    nothing
+end
+update_item_order(h::_ArrayOrderedDict) = update_item_order(h, 1, length(h.order))
+
+# required
+getindex{K,V}(h::_ArrayOrderedDict{K,V}, key) = getindex(h.ht, key).v
+
+# required
+function get{K,V}(d::_ArrayOrderedDict{K,V}, key, default)
+    item = get(d.ht, key, Base.secret_table_token)
+    if is(item, Base.secret_table_token)
+        return default
+    end
+    item.v
+end
+    
+
+# required
+function setindex!{K,V}(d::_ArrayOrderedDict{K,V}, v, key)
+    if haskey(d, key)
+        d.ht[key].v = v
+    else
+        item = ArrayDictItem{K,V}(key, v, length(d.order)+1)
+        d.ht[key] = item
+        push!(d.order, item)
+    end
+    d
+end
+
+# required
+function delete!{K,V}(d::_ArrayOrderedDict{K,V}, key)
+    item = delete!(d.ht, key)
+    splice!(d.order, item.idx)
+    if item.idx <= length(d.order)
+        update_item_order(d, item.idx, length(d.order))
+    end
+    item.v
+end
+
+# required
+function delete!{K,V}(d::_ArrayOrderedDict{K,V}, key, default)
+    item = delete!(d.ht, key, Base.secret_table_token)
+    if is(item, Base.secret_table_token)
+        return default
+    end
+    splice!(d.order, item.idx)
+    if item.idx <= length(d.order)
+        update_item_order(d, item.idx, length(d.order))
+    end
+    item.v
+end
+
+# required
+empty!(d::_ArrayOrderedDict) = (empty!(d.ht); empty!(d.order); d)
+
