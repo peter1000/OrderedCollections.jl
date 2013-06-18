@@ -6,69 +6,21 @@
 # already exists in the dictionary, the original value is updated, and
 # the key remains in its original position.
 #
-# In addition, many of the Dequeue-related functions are available:
-#
-#   push!(od, (k,v))      # Adds (k,v) to the end of the dictionary
-#   pop!(od)              # Removes and returns the last key-value pair
-#   unshift!(od, (k,v))   # Adds (k,v) to the front of the dictionary
-#   shift!(od)            # Removes and returns the first key-value pair
-#   insert!(od, i, (k,v)) # Inserts (k,v) at position i
-#   append!(od, items)    # Adds (k,v) pairs from items to the end of
-#                         # the dictionary
-#
-# Note also that this is not a sorted dictionary, although it can be
-# sorted with 
-#
-#   sort!(od)              # od is an OrderedDict()
-#   sortby!(od, x->od[x])  # sort by value
-#   od2 = sort(od)         # od is not modified
-#
-# You can also sort normal dictionaries, and get a sorted OrderedDict
-# back:
-#
-#   od = sort(d)         # d is a Dict; returns a sorted OrderedDict
-#   #sort!(d)            # error! Dicts can't be sorted in place!
-#
-# Additional AbstractArray-like features
-#
-#   indexof(od, key)     # returns the index of key according to the current order
-#   getitem(od, 2)       # returns the second (k,v) pair according to the current order
-#   od[2]                # same, but only works for OrderedDicts where the
-#                        # keys are not Numbers
-#   first(od) == od[1]   
-#   last(od) == od[end]
-#   reverse!(od)         # reverses od in-place
-#   reverse(od)          # creates a reversed copy of od
 
 # Construction
-import Base.similar, Base.sizehint
-
-# Serialization
-import Base.serialize, Base.deserialize
+import Base: similar, sizehint
 
 # Iteration
-import Base.start, Base.next, Base.done
+import Base: start, next, done
 
 # General Collections
-import Base.isempty, Base.empty!, Base.length
+import Base: isempty, empty!, length
 
 # Indexable Collections
-import Base.setindex!, Base.getindex, Base.first, Base.last, Base.endof, Base.reverse, Base.reverse!,
-       Base.findfirst, Base.findnext
+import Base: setindex!, getindex, first, last, splice!
 
 # Associative Collections
-import Base.haskey, Base.get, Base.getkey, Base.delete!, Base.splice!
-
-# Dequeue-like
-import Base.push!, Base.pop!, Base.unshift!, Base.shift!, Base.append!, Base.insert!
-
-# Sorting
-
-# import Base.sort!, Base.sort, Base.sortby!, Base.sortby, Base.sortperm
-# import Sort.DEFAULT_UNSTABLE, Sort.DEFAULT_STABLE,
-#        Sort.Ordering, Sort.Algorithm, 
-#        Sort.Forward, Sort.Reverse,
-#        Sort.By, Sort.Lt, Sort.lt
+import Base: haskey, get, getkey, delete!
 
 # Exports
 
@@ -81,27 +33,19 @@ export
     start,
     next,
     done,
+    isempty,
     empty!,
-    getindex,
+    length,
     setindex!,
-    push!,
-    pop!,
-    unshift!,
-    shift!,
-    append!,
-    insert!,
-    sort,
-    sort!,
-    sortby,
-    sortby!,
-    sortperm,
-    indexof,
-    getitem, 
+    getindex,
     first,
     last,
-    endof,
-    reverse,
-    reverse!
+    splice!,
+    haskey,
+    get,
+    getkey,
+    delete!,
+    pop!
 
 # by JMW
 macro delegate(source, targets)
@@ -150,15 +94,19 @@ function OrderedDictBase{K,V,Item<:DictItem,Itr}(ht::Dict{K,Item}, order::Itr, :
 end
 
 @delegate OrderedDictBase.ht    [sizehint isempty length haskey getkey]
-@delegate OrderedDictBase.order [start done next]
+@delegate OrderedDictBase.order [start next done first last]
 
 # The following must be implemented for each DictItem/Iterable combination
 @mustimplement getindex{K,V,Item<:DictItem,Itr}(d::OrderedDictBase{K,V,Item,Itr}, key)
 @mustimplement get{K,V,Item<:DictItem,Itr}(d::OrderedDictBase{K,V,Item,Itr}, key, default)
 @mustimplement setindex!{K,V,Item<:DictItem,Itr}(d::OrderedDictBase{K,V,Item,Itr}, v, key)
 @mustimplement delete!{K,V,Item<:DictItem,Itr}(d::OrderedDictBase{K,V,Item,Itr}, key)
-@mustimplement delete!{K,V,Item<:DictItem,Itr}(d::OrderedDictBase{K,V,Item,Itr}, key, default)
+@mustimplement pop!{K,V,Item<:DictItem,Itr}(d::OrderedDictBase{K,V,Item,Itr}, key, default)
 @mustimplement empty!{K,V,Item<:DictItem,Itr}(d::OrderedDictBase{K,V,Item,Itr})
+
+function similar{K,V,Item<:DictItem,Itr}(d::OrderedDictBase{K,V,Item,Itr}, key)
+    OrderedDictBase{K,V,Item,Itr}(similar(d.ht), similar(d.order))
+end
 
 ########################################
 ## Linked-list based OrderedDict type ##
