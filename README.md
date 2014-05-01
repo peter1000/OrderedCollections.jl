@@ -1,10 +1,23 @@
+Deprecated!
+===========
+
+OrderedDict, OrderedSet, and variants thereof are now part of
+DataStructures.jl (https://github.com/JuliaLang/DataStructures.jl).
+
+Some of the functionality mentioned below (such as the deque-related
+functions) are not implemented there, but could be added if there is
+interest.
+
+Either way, this package should be considered deprecated.
+
+
 OrderedCollections
 ==================
 
 An ordered collection is simply a collection which has a particular
 order.  This package follows the convention that the initial order is
 the insertion order of items in the collection, although this order
-can be changed via dequeue-like operations or sorting. 
+can be changed via dequeue-like operations or sorting.
 
 OrderedDict
 ===========
